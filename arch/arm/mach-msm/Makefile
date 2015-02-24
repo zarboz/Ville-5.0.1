@@ -449,6 +449,10 @@ obj-y += display/
 obj-$(CONFIG_ARCH_MSM8974) += board-htc-8974.o htc_acoustic_alsa.o
 obj-$(CONFIG_ARCH_DUMMY) += htc_acoustic_alsa.o
 obj-$(CONFIG_MACH_M8) += board-m8-gpiomux.o board-m8-audio.o
+obj-$(CONFIG_MACH_VILLE) += board-ville.o board-ville-gpu.o board-ville-regulator.o board-ville-gpiomux.o board-ville-storage.o board-ville-audio.o board-ville-camera.o
+obj-$(CONFIG_MACH_VILLE) += board-ville-keypad.o
+obj-$(CONFIG_MACH_VILLE) += htc_bdaddress.o
+obj-$(CONFIG_MACH_VILLE) += htc_util.o
 
 obj-$(CONFIG_HTC_HEADSET_PMIC) += htc_headset_pmic.o
 obj-$(CONFIG_HTC_HEADSET_GPIO) += htc_headset_gpio.o
