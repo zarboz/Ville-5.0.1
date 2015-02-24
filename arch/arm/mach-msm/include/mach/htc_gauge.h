@@ -22,9 +22,7 @@ enum htc_gauge_event {
 	HTC_GAUGE_EVENT_BATT_REMOVED,
 	HTC_GAUGE_EVENT_OVERLOAD,
 	HTC_GAUGE_EVENT_EOC_STOP_CHG,
-	HTC_GAUGE_EVENT_LOW_VOLTAGE_ALARM,
-	HTC_GAUGE_EVENT_QB_MODE_ENTER,
-	HTC_GAUGE_EVENT_QB_MODE_DO_REAL_POWEROFF,
+	HTC_GAUGE_EVENT_PJ_FULL,
 };
 
 struct htc_gauge {
@@ -34,19 +32,16 @@ struct htc_gauge {
 	int (*get_battery_current)(int *result);
 	int (*get_battery_temperature)(int *result);
 	int (*get_battery_id)(int *result);
-	int (*get_battery_id_mv)(int *result);
 	int (*get_battery_soc)(int *result);
 	int (*get_battery_cc)(int *result);
-	int (*get_usb_temperature)(int *result);
-	int (*usb_overheat_otg_mode_check)(void);
-	int (*store_battery_gauge_data)(void);
+	int (*store_battery_data)(void);
 	int (*store_battery_ui_soc)(int soc_ui);
 	int (*get_battery_ui_soc)(void);
 	int (*is_battery_temp_fault)(int *result);
 	int (*is_battery_full)(int *result);
-	int (*enter_qb_mode)(void);
-	int (*exit_qb_mode)(void);
-	int (*qb_mode_pwr_consumption_check)(unsigned long time_stamp);
+	int (*is_pj_full)(int *result);
+	void (*get_pj_voltage)(int *result);
+	int (*calculate_pj_level)(int vol, int is_charging, int batt_temp);
 #if 0
 	int (*dump_all)(void);
 #endif
@@ -56,7 +51,6 @@ struct htc_gauge {
 	int (*enable_lower_voltage_alarm)(int enable);
 	int (*set_lower_voltage_alarm_threshold)(int thres_mV);
 	int (*set_chg_ovp)(int is_ovp);
-	int (*check_soc_for_sw_ocv)(void);
 };
 
 int htc_gauge_event_notify(enum htc_gauge_event);

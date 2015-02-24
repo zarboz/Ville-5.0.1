@@ -26,7 +26,6 @@ enum charger_type_t {
 	CHARGER_MHL_AC,
 	CHARGER_DETECTING,
 	CHARGER_UNKNOWN_USB,
-	CHARGER_NOTIFY,
 };
 
 enum power_supplies_type {
@@ -46,18 +45,9 @@ enum charger_control_flag {
 	END_CHARGER
 };
 
-enum ftm_charger_control_flag {
-	FTM_ENABLE_CHARGER = 0,
-	FTM_STOP_CHARGER,
-	FTM_FAST_CHARGE,
-	FTM_SLOW_CHARGE,
-	FTM_END_CHARGER
-};
-
 #define HTC_BATT_CHG_LIMIT_BIT_TALK				(1)
 #define HTC_BATT_CHG_LIMIT_BIT_NAVI				(1<<1)
 #define HTC_BATT_CHG_LIMIT_BIT_THRML				(1<<2)
-#define HTC_BATT_CHG_LIMIT_BIT_KDDI				(1<<3)
 
 enum batt_context_event {
 	EVENT_TALK_START = 0,
@@ -66,8 +56,8 @@ enum batt_context_event {
 	EVENT_NETWORK_SEARCH_STOP,
 	EVENT_NAVIGATION_START,
 	EVENT_NAVIGATION_STOP,
-	EVENT_MUSIC_START,
-	EVENT_MUSIC_STOP
+	EVENT_DAYDREAM_START,
+	EVENT_DAYDREAM_STOP
 };
 
 

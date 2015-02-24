@@ -117,7 +117,7 @@ static struct resource msm8960_resources_pccntr[] = {
 };
 
 static struct msm_pm_init_data_type msm_pm_data = {
-	.retention_calls_tz = true,
+	//.retention_calls_tz = true,
 };
 
 struct platform_device msm8960_pm_8x60 = {

@@ -26,16 +26,8 @@
 #include <linux/workqueue.h>
 #include <mach/htc_battery_core.h>
 #include <linux/android_alarm.h>
-#include <mach/devices_cmdline.h>
-#include <mach/devices_dtb.h>
-#include <linux/qpnp/qpnp-charger.h>
+#include <mach/board_htc.h>
 
-#define USB_MA_0       (0)
-#define USB_MA_500     (500)
-#define USB_MA_1500    (1500)
-#define USB_MA_1600    (1600)
-
-#define DWC3_DCP	2
 
 static ssize_t htc_battery_show_property(struct device *dev,
 					struct device_attribute *attr,
@@ -49,31 +41,13 @@ static int htc_power_get_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				union power_supply_propval *val);
 
-static int htc_power_usb_set_property(struct power_supply *psy,
-				  enum power_supply_property psp,
-				  const union power_supply_propval *val);
-
-static int htc_battery_property_is_writeable(struct power_supply *psy,
-				enum power_supply_property psp);
-
-static int htc_power_property_is_writeable(struct power_supply *psy,
-				enum power_supply_property psp);
-
 static int htc_battery_get_property(struct power_supply *psy,
 				    enum power_supply_property psp,
 				    union power_supply_propval *val);
 
-static int htc_battery_set_property(struct power_supply *psy,
-				  enum power_supply_property psp,
-				  const union power_supply_propval *val);
-
 static ssize_t htc_battery_charger_ctrl_timer(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf, size_t count);
-
-extern int htc_battery_is_support_qc20(void);
-extern int htc_battery_check_cable_type_from_usb(void);
-extern int board_ftm_mode(void);
 
 #if 1
 #define HTC_BATTERY_ATTR(_name)                                             \
@@ -108,32 +82,21 @@ static struct alarm batt_charger_ctrl_alarm;
 static struct work_struct batt_charger_ctrl_work;
 struct workqueue_struct *batt_charger_ctrl_wq;
 static unsigned int charger_ctrl_stat;
-static unsigned int ftm_charger_ctrl_stat;
+static unsigned int phone_call_stat;
 
 static int test_power_monitor;
-static int test_ftm_mode;
 
 static enum power_supply_property htc_battery_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
-	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_OVERLOAD,
-	POWER_SUPPLY_PROP_INPUT_CURRENT_MAX,
-	POWER_SUPPLY_PROP_INPUT_CURRENT_SETTLED,
-	POWER_SUPPLY_PROP_VOLTAGE_MIN,
-	POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION,
-	POWER_SUPPLY_PROP_USB_OVERHEAT,
 };
 
 static enum power_supply_property htc_power_properties[] = {
-	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
-	POWER_SUPPLY_PROP_CURRENT_MAX,
-	POWER_SUPPLY_PROP_VOLTAGE_MAX,
-	POWER_SUPPLY_PROP_TYPE,
 };
 
 static char *supply_list[] = {
@@ -147,10 +110,7 @@ static struct power_supply htc_power_supplies[] = {
 		.properties = htc_battery_properties,
 		.num_properties = ARRAY_SIZE(htc_battery_properties),
 		.get_property = htc_battery_get_property,
-		.set_property = htc_battery_set_property,
-		.property_is_writeable = htc_battery_property_is_writeable,
 	},
-
 	{
 		.name = "usb",
 		.type = POWER_SUPPLY_TYPE_USB,
@@ -159,8 +119,6 @@ static struct power_supply htc_power_supplies[] = {
 		.properties = htc_power_properties,
 		.num_properties = ARRAY_SIZE(htc_power_properties),
 		.get_property = htc_power_get_property,
-		.set_property = htc_power_usb_set_property,
-		.property_is_writeable = htc_power_property_is_writeable,
 	},
 	{
 		.name = "ac",
@@ -196,11 +154,7 @@ int unregister_notifier_wireless_charger(struct notifier_block *nb)
 static int zcharge_enabled;
 int htc_battery_get_zcharge_mode(void)
 {
-#if 0	
 	return zcharge_enabled;
-#else
-	return 1;
-#endif
 }
 static int __init enable_zcharge_setup(char *str)
 {
@@ -240,7 +194,6 @@ static int htc_battery_get_charging_status(void)
 	case CHARGER_MHL_AC:
 	case CHARGER_DETECTING:
 	case CHARGER_UNKNOWN_USB:
-	case CHARGER_NOTIFY:
 		if (battery_core_info.htc_charge_full)
 			ret = POWER_SUPPLY_STATUS_FULL;
 		else {
@@ -370,20 +323,6 @@ int htc_battery_charger_disable()
 	return rc;
 }
 
-int htc_battery_pwrsrc_disable()
-{
-	int rc = 0;
-
-	if (!battery_core_info.func.func_charger_control) {
-		BATT_ERR("No charger control function!");
-		return -ENOENT;
-	}
-	rc = battery_core_info.func.func_charger_control(DISABLE_PWRSRC);
-	if (rc < 0)
-		BATT_ERR("charger control failed!");
-
-	return rc;
-}
 
 int htc_battery_set_max_input_current(int target_ma)
 {
@@ -396,6 +335,21 @@ int htc_battery_set_max_input_current(int target_ma)
 	rc = battery_core_info.func.func_set_max_input_current(target_ma);
 	if (rc < 0)
 		BATT_ERR("max input current control failed!");
+
+	return rc;
+}
+
+int htc_battery_pwrsrc_disable()
+{
+	int rc = 0;
+
+	if (!battery_core_info.func.func_charger_control) {
+		BATT_ERR("No charger control function!");
+		return -ENOENT;
+	}
+	rc = battery_core_info.func.func_charger_control(DISABLE_PWRSRC);
+	if (rc < 0)
+		BATT_ERR("charger control failed!");
 
 	return rc;
 }
@@ -443,47 +397,15 @@ static ssize_t htc_battery_charger_switch(struct device *dev,
 	return count;
 }
 
-static ssize_t htc_battery_ftm_charger_stat(struct device *dev,
+static ssize_t htc_battery_phone_call_stat(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
 	int i = 0;
 
-	i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", ftm_charger_ctrl_stat);
+	i += scnprintf(buf + i, PAGE_SIZE - i, "%u\n", phone_call_stat);
 
 	return i;
-}
-
-static ssize_t htc_battery_ftm_charger_switch(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	unsigned long enable = 0;
-	int rc = 0;
-
-	rc = strict_strtoul(buf, 10, &enable);
-	if (rc)
-		return rc;
-
-	BATT_LOG("Set charger_control:%lu", enable);
-	if (enable >= FTM_END_CHARGER)
-		return -EINVAL;
-
-	if (!battery_core_info.func.func_ftm_charger_control) {
-		BATT_ERR("No charger control function!");
-		return -ENOENT;
-	}
-
-	rc = battery_core_info.func.func_ftm_charger_control(enable);
-	if (rc < 0) {
-		BATT_ERR("charger control failed!");
-		return rc;
-	}
-	ftm_charger_ctrl_stat = enable;
-
-	alarm_cancel(&batt_charger_ctrl_alarm);
-
-	return count;
 }
 
 static ssize_t htc_battery_set_phone_call(struct device *dev,
@@ -509,35 +431,10 @@ static ssize_t htc_battery_set_phone_call(struct device *dev,
 	else
 		battery_core_info.func.func_context_event_handler(EVENT_TALK_STOP);
 
-	return count;
-}
-
-static ssize_t htc_battery_set_play_music(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	unsigned long play_music = 0;
-	int rc = 0;
-
-	rc = strict_strtoul(buf, 10, &play_music);
-	if (rc)
-		return rc;
-
-	BATT_LOG("set context play music=%lu", play_music);
-
-	if (!battery_core_info.func.func_context_event_handler) {
-		BATT_ERR("No context_event_notify function!");
-		return -ENOENT;
-	}
-
-	if (play_music)
-		battery_core_info.func.func_context_event_handler(EVENT_MUSIC_START);
-	else
-		battery_core_info.func.func_context_event_handler(EVENT_MUSIC_STOP);
+	 phone_call_stat = phone_call;
 
 	return count;
 }
-
 static ssize_t htc_battery_set_network_search(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -617,6 +514,35 @@ static ssize_t htc_battery_set_context_event(struct device *dev,
 	return count;
 }
 
+static ssize_t htc_battery_set_disable_limit_chg(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	int rc = 0;
+	unsigned long disable_limit_chg = 0;
+
+	rc = strict_strtoul(buf, 10, &disable_limit_chg);
+	if (rc)
+		return rc;
+
+	BATT_LOG("Set context disable_limit_chg = %lu", disable_limit_chg);
+
+	if((disable_limit_chg != 0) && (disable_limit_chg != 1))
+		return -EINVAL;
+
+	if (!battery_core_info.func.func_context_event_handler) {
+		BATT_ERR("No context_event_notify function!");
+		return -ENOENT;
+	}
+
+	if (disable_limit_chg)
+		battery_core_info.func.func_context_event_handler(EVENT_DAYDREAM_START);
+	else
+		battery_core_info.func.func_context_event_handler(EVENT_DAYDREAM_STOP);
+
+	return count;
+}
+
 static ssize_t htc_battery_trigger_store_battery_data(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -643,32 +569,6 @@ static ssize_t htc_battery_trigger_store_battery_data(struct device *dev,
 	return count;
 }
 
-static ssize_t htc_battery_qb_mode_shutdown_status(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	int rc = 0;
-	unsigned long trigger_flag = 0;
-
-	rc = strict_strtoul(buf, 10, &trigger_flag);
-	if (rc)
-		return rc;
-
-	BATT_LOG("Set context trigger_flag = %lu", trigger_flag);
-
-	if((trigger_flag != 0) && (trigger_flag != 1))
-		return -EINVAL;
-
-	if (!battery_core_info.func.func_qb_mode_shutdown_status) {
-		BATT_ERR("No set trigger qb mode shutdown status function!");
-		return -ENOENT;
-	}
-
-	battery_core_info.func.func_qb_mode_shutdown_status(trigger_flag);
-
-	return count;
-}
-
 static struct device_attribute htc_battery_attrs[] = {
 	HTC_BATTERY_ATTR(batt_id),
 	HTC_BATTERY_ATTR(batt_vol),
@@ -679,9 +579,10 @@ static struct device_attribute htc_battery_attrs[] = {
 	HTC_BATTERY_ATTR(full_bat),
 	HTC_BATTERY_ATTR(over_vchg),
 	HTC_BATTERY_ATTR(batt_state),
-	HTC_BATTERY_ATTR(batt_cable_in),
-	HTC_BATTERY_ATTR(usb_temp),
-	HTC_BATTERY_ATTR(usb_overheat),
+	HTC_BATTERY_ATTR(batt_overload),
+	HTC_BATTERY_ATTR(pj_exist),
+	HTC_BATTERY_ATTR(pj_status),
+	HTC_BATTERY_ATTR(pj_level),
 
 	__ATTR(batt_attr_text, S_IRUGO, htc_battery_show_batt_attr, NULL),
 	__ATTR(batt_power_meter, S_IRUGO, htc_battery_show_cc_attr, NULL),
@@ -700,33 +601,27 @@ static struct device_attribute htc_set_delta_attrs[] = {
 		htc_battery_charger_switch),
 	__ATTR(charger_timer, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_charger_ctrl_timer),
-	__ATTR(phone_call, S_IWUSR | S_IWGRP, NULL,
+	__ATTR(phone_call, S_IWUSR | S_IWGRP, htc_battery_phone_call_stat,
 		htc_battery_set_phone_call),
-	__ATTR(play_music, S_IWUSR | S_IWGRP, NULL,
-		htc_battery_set_play_music),
 	__ATTR(network_search, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_set_network_search),
 	__ATTR(navigation, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_set_navigation),
 	__ATTR(context_event, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_set_context_event),
+	__ATTR(disable_limit_chg, S_IWUSR | S_IWGRP, NULL,
+		htc_battery_set_disable_limit_chg),
 	__ATTR(store_battery_data, S_IWUSR | S_IWGRP, NULL,
 		htc_battery_trigger_store_battery_data),
-	__ATTR(qb_mode_shutdown, S_IWUSR | S_IWGRP, NULL,
-		htc_battery_qb_mode_shutdown_status),
-	__ATTR(ftm_charger_control, S_IWUSR | S_IWGRP, htc_battery_ftm_charger_stat,
-		htc_battery_ftm_charger_switch),
 };
 
 static struct device_attribute htc_battery_rt_attrs[] = {
 	__ATTR(batt_vol_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
 	__ATTR(batt_current_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
 	__ATTR(batt_temp_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
+	__ATTR(pj_exist_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
+	__ATTR(pj_vol_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
 	__ATTR(voltage_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
-#if defined(CONFIG_MACH_DUMMY)
-	__ATTR(usb_temp_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
-#endif
-	__ATTR(batt_id_now, S_IRUGO, htc_battery_rt_attr_show, NULL),
 };
 
 
@@ -767,49 +662,6 @@ succeed:
 	return rc;
 }
 
-static int htc_battery_set_property(struct power_supply *psy,
-				  enum power_supply_property psp,
-				  const union power_supply_propval *val)
-{
-	int ret = 0;
-
-	if (!val) {
-		pr_err("%s: val is null, return!\n", __func__);
-		return -EINVAL;
-	}
-	switch (psp) {
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
-#if 0
-		if (battery_core_info.func.func_set_chg_property)
-			ret = battery_core_info.func.func_set_chg_property(psp,
-				val->intval / 1000);
-		else {
-			pr_info("%s: function doesn't exist! psp=%d\n", __func__, psp);
-			return ret;
-		}
-		break;
-#else
-		return ret;
-#endif
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_SETTLED:
-		if (battery_core_info.func.func_set_chg_property)
-			ret = battery_core_info.func.func_set_chg_property(psp, val->intval);
-		else {
-			pr_info("%s: function doesn't exist! psp=%d\n", __func__, psp);
-			return ret;
-		}
-		break;
-	default:
-		pr_info("%s: invalid type, psp=%d\n", __func__, psp);
-		return -EINVAL;
-	}
-	pr_info("%s: batt power_supply_changed, psp=%d, intval=%d, ret=%d\n",
-		__func__, psp, val->intval, ret);
-	power_supply_changed(&htc_power_supplies[BATTERY_SUPPLY]);
-	return ret;
-}
-
 static int htc_battery_get_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				union power_supply_propval *val)
@@ -832,41 +684,30 @@ static int htc_battery_get_property(struct power_supply *psy,
 		val->intval = battery_core_info.present;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
-		val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		mutex_lock(&battery_core_info.info_lock);
+#ifdef CONFIG_HTC_BATT8x60
+		if (battery_core_info.htc_charge_full == 0)
+			val->intval = battery_core_info.rep.level;
+		else
+			val->intval = 100;
+#else
 		val->intval = battery_core_info.rep.level;
+#endif
 		mutex_unlock(&battery_core_info.info_lock);
 		break;
 	case POWER_SUPPLY_PROP_OVERLOAD:
 		val->intval = battery_core_info.rep.overload;
 		break;
-	case POWER_SUPPLY_PROP_CHARGE_TYPE:
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_SETTLED:
-	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
-	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION:
-		if (battery_core_info.func.func_get_chg_status) {
-			val->intval = battery_core_info.func.func_get_chg_status(psp);
-			if (val->intval == (-EINVAL))
-				pr_info("%s: function not ready. psp=%d\n", __func__, psp);
-		} else
-			pr_info("%s: function doesn't exist! psp=%d\n", __func__, psp);
-		break;
-	case POWER_SUPPLY_PROP_USB_OVERHEAT:
-		val->intval = battery_core_info.rep.usb_overheat;
-		break;
 	default:
-		pr_info("%s: invalid type, psp=%d\n", __func__, psp);
 		return -EINVAL;
 	}
 
 	return 0;
 }
 
-
-static int usb_voltage_max = 0;
 static int htc_power_get_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				union power_supply_propval *val)
@@ -901,92 +742,12 @@ static int htc_power_get_property(struct power_supply *psy,
 			else
 				val->intval = 0;
 		} else if (psy->type == POWER_SUPPLY_TYPE_WIRELESS)
-			val->intval = (charger == CHARGER_WIRELESS ? 1 : 0);
-		else if (psy->type == POWER_SUPPLY_TYPE_USB_DCP)
-			val->intval = (charger ==  CHARGER_AC ? 1 : 0);
+			val->intval = (charger ==  CHARGER_WIRELESS ? 1 : 0);
 		else
 			val->intval = 0;
 		break;
-	case POWER_SUPPLY_PROP_CURRENT_MAX :
-		if (charger == CHARGER_BATTERY)
-			val->intval = USB_MA_0;
-		else if (charger == CHARGER_AC
-				|| charger == CHARGER_9V_AC
-				|| charger == CHARGER_WIRELESS)
-			val->intval = USB_MA_1500 * 1000;
-		else
-			val->intval = USB_MA_500 * 1000;
-
-		if (psy->type == POWER_SUPPLY_TYPE_USB_DCP)
-			val->intval = USB_MA_1600 * 1000;
-		break;
-	
-	case POWER_SUPPLY_PROP_PRESENT :
-		if (charger == CHARGER_BATTERY)
-			val->intval  = 0;
-		else
-			val->intval  = 1;
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		if (psy->type == POWER_SUPPLY_TYPE_USB_DCP ||
-				psy->type == POWER_SUPPLY_TYPE_USB)
-			val->intval = usb_voltage_max;
-		else
-			return val->intval  = 0;
-		break;
-	case POWER_SUPPLY_PROP_TYPE:
-		val->intval = psy->type;
-		break;
-	default:
-		pr_info("%s: invalid type, psp=%d\n", __func__, psp);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int htc_power_usb_set_property(struct power_supply *psy,
-				  enum power_supply_property psp,
-				  const union power_supply_propval *val)
-{
-	switch (psp) {
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		usb_voltage_max = val->intval;
-		break;
-	case POWER_SUPPLY_PROP_TYPE:
-		psy->type = val->intval;
-		break;
 	default:
 		return -EINVAL;
-	}
-
-	power_supply_changed(&htc_power_supplies[USB_SUPPLY]);
-	return 0;
-}
-
-static int htc_battery_property_is_writeable(struct power_supply *psy,
-				enum power_supply_property psp)
-{
-	switch (psp) {
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_INPUT_CURRENT_SETTLED:
-	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
-		return 1;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static int htc_power_property_is_writeable(struct power_supply *psy,
-				enum power_supply_property psp)
-{
-	switch (psp) {
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		return 1;
-	default:
-		break;
 	}
 
 	return 0;
@@ -1043,19 +804,36 @@ static ssize_t htc_battery_show_property(struct device *dev,
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 				battery_core_info.rep.batt_state);
 		break;
-	case BATT_CABLEIN:
-		if(battery_core_info.rep.charging_source == CHARGER_BATTERY)
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", 0);
-		else
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", 1);
-		break;
-	case USB_TEMP:
+	case OVERLOAD:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				battery_core_info.rep.usb_temp);
+				battery_core_info.rep.overload);
 		break;
-	case USB_OVERHEAT:
+	case PJ_EXIST:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-				battery_core_info.rep.usb_overheat);
+				battery_core_info.rep.pj_src);
+		break;
+	case PJ_STATUS:
+		if (battery_core_info.rep.pj_src) {
+			
+			if (battery_core_info.rep.pj_full)	{
+				if ((battery_core_info.rep.pj_level - battery_core_info.rep.pj_level_pre) >= 19)
+					BATT_LOG("level diff over 19, level:%d, pre_level:%d\n",
+						battery_core_info.rep.pj_level, battery_core_info.rep.pj_level_pre);
+				else
+					i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", HTC_UI_PJ_FULL);
+			} else { 
+				if (battery_core_info.rep.pj_chg_status == 2 || battery_core_info.rep.charging_enabled)
+					i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", HTC_UI_PJ_CHG);
+				else
+					i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", HTC_UI_PJ_NOT_CHG);
+			}
+		} else {
+			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", HTC_UI_PJ_NOT_CHG);
+		}
+		break;
+	case PJ_LEVEL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+				battery_core_info.rep.pj_level);
 		break;
 	default:
 		i = -EINVAL;
@@ -1154,26 +932,6 @@ static void batt_charger_ctrl_alarm_handler(struct alarm *alarm)
 	queue_work(batt_charger_ctrl_wq, &batt_charger_ctrl_work);
 }
 
-static unsigned int get_htc_debug_flag(void)
-{
-
-        unsigned int cfg = 0 ;
-    
-        if (get_tamper_sf() == 0) {
-                if ((get_kernel_flag() & KERNEL_FLAG_KEEP_CHARG_ON)
-					|| (get_kernel_flag() & KERNEL_FLAG_ENABLE_FAST_CHARGE)) {
-                        cfg = 1 ;
-                }
-        }
-	return cfg;
-}
-
-void htc_battery_update_batt_uevent(void)
-{
-	power_supply_changed(&htc_power_supplies[BATTERY_SUPPLY]);
-	BATT_LOG("%s: power_supply_changed: battery", __func__);
-}
-
 int htc_battery_core_update_changed(void)
 {
 	struct battery_info_reply new_batt_info_rep;
@@ -1182,7 +940,6 @@ int htc_battery_core_update_changed(void)
 	int is_send_ac_uevent = 0;
 	int is_send_wireless_charger_uevent = 0;
 	static int batt_temp_over_68c_count = 0;
-	unsigned int dbg_cfg = 0 ;
 
 	if (battery_register) {
 		BATT_ERR("No battery driver exists.");
@@ -1207,8 +964,17 @@ int htc_battery_core_update_changed(void)
 		if (CHARGER_USB == battery_core_info.rep.charging_source ||
 			CHARGER_USB == new_batt_info_rep.charging_source)
 			is_send_usb_uevent = 1;
+		if (CHARGER_DETECTING == battery_core_info.rep.charging_source ||
+			CHARGER_DETECTING == new_batt_info_rep.charging_source)
+			is_send_usb_uevent = 1;
+		if (CHARGER_UNKNOWN_USB == battery_core_info.rep.charging_source ||
+			CHARGER_UNKNOWN_USB == new_batt_info_rep.charging_source)
+			is_send_usb_uevent = 1;
 		if (CHARGER_AC == battery_core_info.rep.charging_source ||
 			CHARGER_AC == new_batt_info_rep.charging_source)
+			is_send_ac_uevent = 1;
+		if (CHARGER_9V_AC == battery_core_info.rep.charging_source ||
+			CHARGER_9V_AC == new_batt_info_rep.charging_source)
 			is_send_ac_uevent = 1;
 		if (CHARGER_MHL_AC == battery_core_info.rep.charging_source ||
 			CHARGER_MHL_AC == new_batt_info_rep.charging_source)
@@ -1217,28 +983,15 @@ int htc_battery_core_update_changed(void)
 			CHARGER_WIRELESS == new_batt_info_rep.charging_source)
 			is_send_wireless_charger_uevent = 1;
 
-		
-		if (htc_battery_is_support_qc20()) {
-			if (CHARGER_AC == new_batt_info_rep.charging_source) {
-				if (htc_battery_check_cable_type_from_usb() == DWC3_DCP) {
-					power_supply_set_supply_type(&htc_power_supplies[USB_SUPPLY], POWER_SUPPLY_TYPE_USB_DCP);
-					is_send_usb_uevent = 1;
-					is_send_ac_uevent = 0;
-				}
-			} else if (CHARGER_AC == battery_core_info.rep.charging_source) {
-				if (htc_power_supplies[USB_SUPPLY].type == POWER_SUPPLY_TYPE_USB_DCP) {
-					power_supply_set_supply_type(&htc_power_supplies[USB_SUPPLY], POWER_SUPPLY_TYPE_USB);
-					is_send_usb_uevent = 1;
-					is_send_ac_uevent = 0;
-				}
-			}
-		}
 	}
 	if ((!is_send_batt_uevent) &&
 		((battery_core_info.rep.level != new_batt_info_rep.level) ||
 		(battery_core_info.rep.batt_vol != new_batt_info_rep.batt_vol) ||
 		(battery_core_info.rep.over_vchg != new_batt_info_rep.over_vchg) ||
-		(battery_core_info.rep.batt_temp != new_batt_info_rep.batt_temp))) {
+		(battery_core_info.rep.batt_temp != new_batt_info_rep.batt_temp) ||
+		(battery_core_info.rep.pj_full!= new_batt_info_rep.pj_full) ||
+		(battery_core_info.rep.pj_src!= new_batt_info_rep.pj_src) ||
+		(battery_core_info.rep.pj_chg_status!= new_batt_info_rep.pj_chg_status))) {
 		is_send_batt_uevent = 1;
 	}
 
@@ -1273,10 +1026,8 @@ int htc_battery_core_update_changed(void)
 	}
 
 	
-	
-	if (test_power_monitor || (test_ftm_mode == 1)) {
-		BATT_LOG("test_power_monitor(%d) or test_ftm_mode(%d) is set: overwrite fake batt info.",
-				test_power_monitor, test_ftm_mode);
+	if (test_power_monitor) {
+		BATT_LOG("test_power_monitor is set: overwrite fake batt info.");
 		battery_core_info.rep.batt_id = 77;
 		battery_core_info.rep.batt_temp = 330;
 		battery_core_info.rep.level = 77;
@@ -1307,9 +1058,15 @@ int htc_battery_core_update_changed(void)
 	if (battery_core_info.rep.charging_source == CHARGER_BATTERY)
 		battery_core_info.htc_charge_full = 0;
 	else {
+#ifdef CONFIG_HTC_BATT8x60
+		if (battery_core_info.htc_charge_full &&
+				(battery_core_info.rep.full_level == 100))
+			battery_core_info.htc_charge_full = 1;
+#else
 		if (battery_core_info.htc_charge_full &&
 				(battery_core_info.rep.level == 100))
 			battery_core_info.htc_charge_full = 1;
+#endif
 		else {
 			if (battery_core_info.rep.level == 100)
 				battery_core_info.htc_charge_full = 1;
@@ -1327,13 +1084,9 @@ int htc_battery_core_update_changed(void)
 	battery_core_info.update_time = jiffies;
 	mutex_unlock(&battery_core_info.info_lock);
 
-	
-	dbg_cfg = get_htc_debug_flag();
-
-	BATT_EMBEDDED("ID=%d,level=%d,level_raw=%d,vol=%d,temp=%d,current=%d,"
-		"chg_src=%d,chg_en=%d,full_bat=%d,over_vchg=%d,"
-		"batt_state=%d,cable_ready=%d,overload=%d,ui_chg_full=%d,"
-		"usb_temp=%d,usb_overheat=%d,CFG=0x%x",
+	BATT_LOG("ID=%d,level=%d,level_raw=%d,vol=%d,temp=%d,current=%d,"
+		"chg_src=%d,chg_en=%d,pj_src=%d,pj_level=%d,full_bat=%d,"
+		"over_vchg=%d,batt_state=%d,overload=%d,ui_chg_full=%d",
 			battery_core_info.rep.batt_id,
 			battery_core_info.rep.level,
 			battery_core_info.rep.level_raw,
@@ -1342,15 +1095,13 @@ int htc_battery_core_update_changed(void)
 			battery_core_info.rep.batt_current,
 			battery_core_info.rep.charging_source,
 			battery_core_info.rep.charging_enabled,
+			battery_core_info.rep.pj_src,
+			battery_core_info.rep.pj_level,
 			battery_core_info.rep.full_bat,
 			battery_core_info.rep.over_vchg,
 			battery_core_info.rep.batt_state,
-			battery_core_info.rep.cable_ready,
 			battery_core_info.rep.overload,
-			battery_core_info.htc_charge_full,
-			battery_core_info.rep.usb_temp,
-			battery_core_info.rep.usb_overheat,
-			dbg_cfg);
+			battery_core_info.htc_charge_full);
 
 
 	
@@ -1389,8 +1140,6 @@ int htc_battery_core_register(struct device *dev,
 	test_power_monitor =
 		(get_kernel_flag() & KERNEL_FLAG_TEST_PWR_SUPPLY) ? 1 : 0;
 
-	test_ftm_mode = board_ftm_mode();
-
 	mutex_init(&battery_core_info.info_lock);
 
 	if (htc_battery->func_get_batt_rt_attr)
@@ -1413,11 +1162,10 @@ int htc_battery_core_register(struct device *dev,
 					htc_battery->func_charger_control;
 	if (htc_battery->func_set_max_input_current)
 		battery_core_info.func.func_set_max_input_current =
-					htc_battery->func_set_max_input_current;	
+					htc_battery->func_set_max_input_current;
 	if (htc_battery->func_context_event_handler)
 		battery_core_info.func.func_context_event_handler =
 					htc_battery->func_context_event_handler;
-
 	if (htc_battery->func_set_full_level)
 		battery_core_info.func.func_set_full_level =
 					htc_battery->func_set_full_level;
@@ -1427,21 +1175,9 @@ int htc_battery_core_register(struct device *dev,
 	if (htc_battery->func_notify_pnpmgr_charging_enabled)
 		battery_core_info.func.func_notify_pnpmgr_charging_enabled =
 					htc_battery->func_notify_pnpmgr_charging_enabled;
-	if (htc_battery->func_get_chg_status)
-		battery_core_info.func.func_get_chg_status =
-					htc_battery->func_get_chg_status;
-	if (htc_battery->func_set_chg_property)
-		battery_core_info.func.func_set_chg_property =
-					htc_battery->func_set_chg_property;
 	if (htc_battery->func_trigger_store_battery_data)
 		battery_core_info.func.func_trigger_store_battery_data =
 					htc_battery->func_trigger_store_battery_data;
-	if (htc_battery->func_qb_mode_shutdown_status)
-		battery_core_info.func.func_qb_mode_shutdown_status =
-					htc_battery->func_qb_mode_shutdown_status;
-	if (htc_battery->func_ftm_charger_control)
-		battery_core_info.func.func_ftm_charger_control =
-					htc_battery->func_ftm_charger_control;
 
 	
 	for (i = 0; i < ARRAY_SIZE(htc_power_supplies); i++) {
@@ -1481,10 +1217,7 @@ int htc_battery_core_register(struct device *dev,
 	battery_core_info.rep.temp_fault = -1;
 	
 	battery_core_info.rep.batt_state = 0;
-	battery_core_info.rep.cable_ready = 0;
 	battery_core_info.rep.overload = 0;
-	battery_core_info.rep.usb_temp = 285;
-	battery_core_info.rep.usb_overheat = 0;
 
 	battery_over_loading = 0;
 
