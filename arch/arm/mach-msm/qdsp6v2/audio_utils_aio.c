@@ -181,7 +181,7 @@ static int audio_aio_pause(struct q6audio_aio  *audio)
 
 		if (rc == 0) {
 			/* Send suspend only if pause was successful */
-			rc = q6asm_cmd(audio->ac, CMD_SUSPEND);
+			rc = q6asm_cmd(audio->ac, CMD_PAUSE);
 			if (rc < 0)
 				pr_err("%s[%p]: suspend cmd failed rc=%d\n",
 					__func__, audio, rc);
